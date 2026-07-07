@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Медиаплан — виджет сделки</title>
+<script src="//api.bitrix24.com/api/v1/"></script>
+<style>
+  :root{
+    --blue:#0b64d6; --border:#d7dde5; --head:#eef2f7; --green:#e8f6ee; --red:#fdecec;
+  }
+  *{box-sizing:border-box;}
+  body{font-family:Arial,Helvetica,sans-serif;font-size:13px;margin:0;padding:14px;background:#fff;color:#1b2733;}
+  h2{font-size:16px;margin:0 0 4px;}
+  .sub{color:#6b7684;margin-bottom:14px;}
+  .toolbar{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center;}
+  button{background:var(--blue);color:#fff;border:none;border-radius:6px;padding:8px 14px;font-size:13px;cursor:pointer;}
+  button.secondary{background:#eef2f7;color:#1b2733;}
+  button:disabled{opacity:.5;cursor:default;}
+  button:hover:not(:disabled){filter:brightness(1.08);}
+  .status{margin-left:auto;font-size:12px;color:#6b7684;}
+  .status.ok{color:#1a9e5c;}
+  .status.err{color:#d64545;}
+  table{border-collapse:collapse;width:100%;table-layout:fixed;}
+  th,td{border:1px solid var(--border);padding:4px 5px;font-size:12px;overflow:hidden;text-overflow:ellipsis;}
+  th{background:var(--head);position:sticky;top:0;font-weight:600;text-align:center;white-space:normal;}
+  td[contenteditable="true"]{background:#fff;cursor:text;}
+  td.calc{background:#f7f9fb;color:#33414f;}
+  td.num{text-align:right;}
+  .tablewrap{overflow:auto;max-height:60vh;border:1px solid var(--border);border-radius:6px;}
+  .rownum{background:var(--head);text-align:center;color:#8792a0;user-select:none;}
+  .row-actions{width:26px;text-align:center;cursor:pointer;color:#c0392b;user-select:none;}
+  .totals td{font-weight:700;background:#f0f4f9;}
+  .footer{margin-top:10px;display:flex;gap:8px;}
+  .hint{font-size:11px;color:#8792a0;margin-top:6px;}
+  .badge{display:inline-block;background:#eef2f7;border-radius:4px;padding:2px 6px;font-size:11px;color:#556;}
+</style>
+</head>
+<body>
+
+<h2>Медиаплан для размещения рекламы на медиабордах</h2>
+<div class="sub">Заполните таблицу по каждой рекламной конструкции. Итоговые столбцы считаются автоматически.</div>
+
+<div class="toolbar">
+  <button id="addRowBtn" class="secondary">+ Добавить строку</button>
+  <button id="addRowsBtn5" class="secondary">+10 строк</button>
+  <span class="badge" id="dealBadge">Сделка: —</span>
+  <span class="status" id="status">Готово</span>
+</div>
+
+<div class="tablewrap">
+<table id="grid">
+  <thead>
+    <tr>
+      <th style="width:26px;"></th>
+      <th style="width:26px;">№</th>
+      <th style="width:110px;">Город</th>
+      <th style="width:220px;">Медиаборд</th>
+      <th style="width:90px;">Формат</th>
+      <th style="width:100px;">Дата начала</th>
+      <th style="width:100px;">Дата окончания</th>
+      <th style="width:70px;">Кол-во дней</th>
+      <th style="width:70px;">Кол-во бордов</th>
+      <th style="width:90px;">Показов/день</th>
+      <th style="width:100px;">Показов всего</th>
+      <th style="width:100px;">Цена по прайсу с НДС</th>
+      <th style="width:90px;">Цена за день</th>
+      <th style="width:90px;">Позиция (Top/Middle/Small)</th>
+      <th style="width:90px;">Скидка</th>
+      <th style="width:100px;">Цена за вычетом скидки</th>
+      <th style="width:110px;">Итого с НДС</th>
+    </tr>
+  </thead>
+  <tbody id="gridBody"></tbody>
+  <tfoot>
+    <tr class="totals">
+      <td colspan="7" style="text-align:right;">Итого:</td>
+      <td class="num" id="totDays">0</td>
+      <td class="num" id="totBoards">0</td>
+      <td class="num" id="totImprDay">0</td>
+      <td class="num" id="totImprAll">0</td>
+      <td class="num" id="totPrice">0</td>
+      <td></td>
+      <td></td>
+      <td></td>
+      <td class="num" id="totDiscPrice">0</td>
+      <td class="num" id="totFinal">0</td>
+    </tr>
+  </tfoot>
+</table>
+</div>
+
+<div class="hint">
+  Формулы (как в исходном Excel-файле): Кол-во дней = Дата окончания − Дата начала + 1 &middot;
+  Показов всего = Показов/день × Кол-во дней &middot; Цена за день = Цена по прайсу / 30 &middot;
+  Скидка: Top = 50%, Middle = 58.33%, Small = 66.67% &middot;
+  Цена за вычетом скидки = Цена за день × (1 − Скидка) &middot; Итого с НДС = Цена за вычетом скидки × Кол-во дней
+</div>
+
+<div class="footer">
+  <button id="saveBtn">Сохранить в CRM (создать элементы смарт-процесса)</button>
+  <button id="clearBtn" class="secondary">Очистить таблицу</button>
+</div>
+
+<script>
+/* =========================================================================
+   НАСТРОЙКИ — заполните перед использованием
+   ========================================================================= */
+var CONFIG = {
+  // Входящий вебхук: Приложения -> Разработчикам -> Другое -> Входящий вебхук.
+  // Нужны права: crm
+  WEBHOOK_URL: "https://b24-n5yvoa.bitrix24.kz/rest/1/fymw1kz5h37ea6aq/",
+
+  // entityTypeId вашего смарт-процесса (узнать методом crm.type.list или crm.enum.ownertype)
+  SMART_PROCESS_ENTITY_TYPE_ID: 1036,
+
+  // Код поля "родительская сделка" в смарт-процессе. Обычно это parentId2 (2 = сделки).
+  // Если смарт-процесс привязан к сделкам, Bitrix создаёт поле parentId2 автоматически.
+  PARENT_DEAL_FIELD: "parentId2",
+
+  // Сопоставление колонок таблицы с полями (UF-кодами) смарт-процесса.
+  // Замените значения на реальные коды полей, которые вы создали в смарт-процессе.
+  FIELD_MAP: {
+    city:        "UF_CRM_7_1783434558",
+    board:       "UF_CRM_7_1783434745",
+    format:      "UF_CRM_7_1783434751",
+    dateStart:   "UF_CRM_7_1783434772",
+    dateEnd:     "UF_CRM_7_1783434778",
+    days:        "UF_CRM_7_1783434790",
+    boardsCount: "UF_CRM_7_1783434797",
+    imprDay:     "UF_CRM_7_1783434805",
+    imprAll:     "UF_CRM_7_1783434813",
+    priceList:   "UF_CRM_7_1783434820",
+    priceDay:    "UF_CRM_7_1783434830",
+    position:    "UF_CRM_7_1783434836",
+    discount:    "UF_CRM_7_1783434860",
+    priceDisc:   "UF_CRM_7_1783434875",
+    total:       "UF_CRM_7_1783434885"
+  }
+};
+
+var DISCOUNT_BY_POSITION = { "Top": 0.5, "Middle": 0.5833333333, "Small": 0.6666666667 };
+
+var dealId = null;
+var rows = [];
+var rowSeq = 0;
+
+function fmtDate(d){
+  if(!d) return "";
+  var dt = (d instanceof Date) ? d : new Date(d);
+  if(isNaN(dt.getTime())) return "";
+  var mm = String(dt.getMonth()+1).padStart(2,"0");
+  var dd = String(dt.getDate()).padStart(2,"0");
+  return dt.getFullYear()+"-"+mm+"-"+dd;
+}
+function parseDate(s){
+  if(!s) return null;
+  var dt = new Date(s);
+  return isNaN(dt.getTime()) ? null : dt;
+}
+function daysBetween(start,end){
+  var s = parseDate(start), e = parseDate(end);
+  if(!s || !e) return 0;
+  var diff = Math.round((e-s)/(1000*60*60*24)) + 1;
+  return diff > 0 ? diff : 0;
+}
+function numFmt(n){
+  if(n===null||n===undefined||isNaN(n)) return "0";
+  return Math.round(n*100)/100;
+}
+
+function newRow(data){
+  rowSeq++;
+  return Object.assign({
+    id: rowSeq, city:"", board:"", format:"STD",
+    dateStart:"", dateEnd:"", boardsCount:1,
+    imprDay:0, priceList:0, position:"Top"
+  }, data||{});
+}
+
+function calcRow(r){
+  r.days = daysBetween(r.dateStart, r.dateEnd);
+  r.imprAll = (Number(r.imprDay)||0) * r.days;
+  r.priceDay = (Number(r.priceList)||0) / 30;
+  var disc = DISCOUNT_BY_POSITION[r.position] || 0;
+  r.discount = disc;
+  r.priceDisc = r.priceDay * (1 - disc);
+  r.total = r.priceDisc * r.days;
+  return r;
+}
+
+function render(){
+  var tbody = document.getElementById("gridBody");
+  tbody.innerHTML = "";
+  rows.forEach(function(r, idx){
+    calcRow(r);
+    var tr = document.createElement("tr");
+    tr.dataset.id = r.id;
+    tr.innerHTML =
+      '<td class="row-actions" data-act="del" title="Удалить строку">✕</td>' +
+      '<td class="rownum">'+(idx+1)+'</td>' +
+      td("city", r.city, true) +
+      td("board", r.board, true) +
+      selectFormat(r.format) +
+      dateInput("dateStart", r.dateStart) +
+      dateInput("dateEnd", r.dateEnd) +
+      '<td class="calc num">'+r.days+'</td>' +
+      td("boardsCount", r.boardsCount, true, "num") +
+      td("imprDay", r.imprDay, true, "num") +
+      '<td class="calc num">'+numFmt(r.imprAll)+'</td>' +
+      td("priceList", r.priceList, true, "num") +
+      '<td class="calc num">'+numFmt(r.priceDay)+'</td>' +
+      selectPosition(r.position) +
+      '<td class="calc num">'+Math.round(r.discount*10000)/100+'%</td>' +
+      '<td class="calc num">'+numFmt(r.priceDisc)+'</td>' +
+      '<td class="calc num">'+numFmt(r.total)+'</td>';
+    tbody.appendChild(tr);
+  });
+  updateTotals();
+}
+
+function td(field, value, editable, cls){
+  return '<td class="'+(cls||"")+'" '+(editable?'contenteditable="true"':'')+' data-field="'+field+'">'+(value===undefined||value===null?"":value)+'</td>';
+}
+function dateInput(field, value){
+  return '<td><input type="date" data-field="'+field+'" value="'+(value?fmtDate(value):"")+'" style="width:100%;border:none;font-size:12px;"></td>';
+}
+function selectFormat(value){
+  var opts = ["STD","бонус","PREMIUM"];
+  var html = '<td><select data-field="format" style="width:100%;border:none;font-size:12px;">';
+  opts.forEach(function(o){
+    html += '<option value="'+o+'"'+(o===value?" selected":"")+'>'+o+'</option>';
+  });
+  html += '</select></td>';
+  return html;
+}
+function selectPosition(value){
+  var opts = ["Top","Middle","Small"];
+  var html = '<td><select data-field="position" style="width:100%;border:none;font-size:12px;">';
+  opts.forEach(function(o){
+    html += '<option value="'+o+'"'+(o===value?" selected":"")+'>'+o+'</option>';
+  });
+  html += '</select></td>';
+  return html;
+}
+
+function updateTotals(){
+  var totDays=0,totBoards=0,totImprDay=0,totImprAll=0,totPrice=0,totDiscPrice=0,totFinal=0;
+  rows.forEach(function(r){
+    totDays += r.days||0;
+    totBoards += Number(r.boardsCount)||0;
+    totImprDay += Number(r.imprDay)||0;
+    totImprAll += r.imprAll||0;
+    totPrice += Number(r.priceList)||0;
+    totDiscPrice += r.priceDisc||0;
+    totFinal += r.total||0;
+  });
+  document.getElementById("totDays").textContent = totDays;
+  document.getElementById("totBoards").textContent = totBoards;
+  document.getElementById("totImprDay").textContent = totImprDay;
+  document.getElementById("totImprAll").textContent = totImprAll;
+  document.getElementById("totPrice").textContent = numFmt(totPrice);
+  document.getElementById("totDiscPrice").textContent = numFmt(totDiscPrice);
+  document.getElementById("totFinal").textContent = numFmt(totFinal);
+}
+
+document.getElementById("gridBody").addEventListener("input", function(e){
+  var t = e.target;
+  var tr = t.closest("tr");
+  if(!tr) return;
+  var id = Number(tr.dataset.id);
+  var row = rows.find(function(r){return r.id===id;});
+  if(!row) return;
+  var field = t.dataset.field;
+  if(!field) return;
+  var val = t.isContentEditable ? t.textContent : t.value;
+  row[field] = val;
+  render();
+});
+document.getElementById("gridBody").addEventListener("change", function(e){
+  var t = e.target;
+  if(t.tagName !== "SELECT" && t.type !== "date") return;
+  var tr = t.closest("tr");
+  var id = Number(tr.dataset.id);
+  var row = rows.find(function(r){return r.id===id;});
+  if(!row) return;
+  row[t.dataset.field] = t.value;
+  render();
+});
+document.getElementById("gridBody").addEventListener("click", function(e){
+  if(e.target.dataset.act === "del"){
+    var tr = e.target.closest("tr");
+    var id = Number(tr.dataset.id);
+    rows = rows.filter(function(r){return r.id!==id;});
+    render();
+  }
+});
+
+document.getElementById("addRowBtn").addEventListener("click", function(){
+  rows.push(newRow());
+  render();
+});
+document.getElementById("addRowsBtn5").addEventListener("click", function(){
+  for(var i=0;i<10;i++) rows.push(newRow());
+  render();
+});
+document.getElementById("clearBtn").addEventListener("click", function(){
+  if(!confirm("Очистить всю таблицу?")) return;
+  rows = [];
+  render();
+});
+
+function setStatus(text, cls){
+  var el = document.getElementById("status");
+  el.textContent = text;
+  el.className = "status" + (cls?(" "+cls):"");
+}
+
+/* ============================ Сохранение через вебхук ============================ */
+function callB24(method, params){
+  return fetch(CONFIG.WEBHOOK_URL + method + ".json", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify(params||{})
+  }).then(function(r){ return r.json(); });
+}
+
+function buildFieldsForRow(r){
+  var m = CONFIG.FIELD_MAP;
+  var fields = {};
+  fields["title"] = (r.city||"Без города") + " — " + (r.board||"");
+  fields[m.city] = r.city;
+  fields[m.board] = r.board;
+  fields[m.format] = r.format;
+  fields[m.dateStart] = r.dateStart ? fmtDate(r.dateStart) : null;
+  fields[m.dateEnd] = r.dateEnd ? fmtDate(r.dateEnd) : null;
+  fields[m.days] = r.days;
+  fields[m.boardsCount] = r.boardsCount;
+  fields[m.imprDay] = r.imprDay;
+  fields[m.imprAll] = r.imprAll;
+  fields[m.priceList] = r.priceList;
+  fields[m.priceDay] = numFmt(r.priceDay);
+  fields[m.position] = r.position;
+  fields[m.discount] = r.discount;
+  fields[m.priceDisc] = numFmt(r.priceDisc);
+  fields[m.total] = numFmt(r.total);
+  if(dealId){
+    fields[CONFIG.PARENT_DEAL_FIELD] = dealId;
+  }
+  return fields;
+}
+
+function saveAll(){
+  if(rows.length === 0){
+    alert("Таблица пуста — нечего сохранять.");
+    return;
+  }
+  if(!CONFIG.WEBHOOK_URL || CONFIG.WEBHOOK_URL.indexOf("your-portal") !== -1){
+    alert("Вебхук не настроен. Обратитесь к администратору Битрикс24.");
+    return;
+  }
+  document.getElementById("saveBtn").disabled = true;
+  setStatus("Сохранение 0 / "+rows.length+"…");
+
+  var i = 0, okCount = 0, errCount = 0;
+
+  function next(){
+    if(i >= rows.length){
+      document.getElementById("saveBtn").disabled = false;
+      if(errCount===0){
+        setStatus("Готово: сохранено "+okCount+" элементов.", "ok");
+      } else {
+        setStatus("Сохранено "+okCount+", ошибок: "+errCount, "err");
+      }
+      return;
+    }
+    var r = rows[i];
+    var fields = buildFieldsForRow(r);
+    callB24("crm.item.add", {
+      entityTypeId: CONFIG.SMART_PROCESS_ENTITY_TYPE_ID,
+      fields: fields
+    }).then(function(resp){
+      if(resp.error){
+        errCount++;
+        console.error("Ошибка сохранения строки:", resp.error_description || resp.error);
+      } else {
+        okCount++;
+      }
+      i++;
+      setStatus("Сохранение "+i+" / "+rows.length+"…");
+      next();
+    }).catch(function(err){
+      errCount++;
+      i++;
+      console.error(err);
+      next();
+    });
+  }
+  next();
+}
+document.getElementById("saveBtn").addEventListener("click", saveAll);
+
+/* ============================ Инициализация внутри Битрикс24 ============================ */
+function init(){
+  if(typeof BX24 !== "undefined"){
+    BX24.init(function(){
+      var opts = BX24.placement.info().options || {};
+      dealId = opts.ID || opts.id || null;
+      document.getElementById("dealBadge").textContent = "Сделка: #" + (dealId || "—");
+      // старт с одной пустой строкой
+      rows = [newRow()];
+      render();
+    });
+  } else {
+    rows = [newRow()];
+    render();
+  }
+}
+init();
+</script>
+</body>
+</html>
