@@ -1,11 +1,214 @@
-{
-  "headers": [
-    {
-      "source": "/(.*)",
-      "headers": [
-        { "key": "X-Frame-Options", "value": "ALLOWALL" },
-        { "key": "Content-Security-Policy", "value": "frame-ancestors *" }
-      ]
-    }
-  ]
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Медиаборды</title>
+<script src="//api.bitrix24.com/api/v1/"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+    font-family: -apple-system, "Segoe UI", Arial, sans-serif;
+    font-size: 12px;
+    background: #f0f2f5;
+    padding: 10px;
 }
+.screen { display: none; }
+.screen.active { display: block; }
+#screenInstall, #screenNoDeal {
+    background: #fff; border-radius: 8px; padding: 32px;
+    max-width: 480px; box-shadow: 0 1px 6px rgba(0,0,0,.09);
+}
+#screenInstall h2 { font-size: 18px; margin-bottom: 12px; color: #333; }
+#screenInstall p  { color: #666; font-size: 13px; line-height: 1.6; margin-bottom: 6px; }
+#installMsg       { font-weight: 600; font-size: 14px; margin-top: 14px; color: #2fc6f6; }
+#screenNoDeal h3  { font-size: 15px; margin-bottom: 10px; color: #333; }
+#screenNoDeal p   { color: #777; font-size: 13px; line-height: 1.7; }
+#toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.btn { padding: 7px 14px; border: none; border-radius: 5px; cursor: pointer; font-size: 12px; font-weight: 600; transition: background .15s; }
+.btn-add  { background: #2fc6f6; color: #fff; }
+.btn-add:hover  { background: #1aafd4; }
+.btn-save { background: #49c97b; color: #fff; }
+.btn-save:hover { background: #38b369; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+#status  { font-size: 12px; color: #888; }
+#initMsg { font-size: 12px; color: #aaa; font-style: italic; }
+#gridWrap { overflow-x: auto; background: #fff; border: 1px solid #dde1e7; border-radius: 6px; box-shadow: 0 1px 4px rgba(0,0,0,.05); }
+table { border-collapse: collapse; min-width: 100%; }
+thead th { background: #f5f7fa; border: 1px solid #dde1e7; padding: 6px 8px; font-weight: 700; white-space: nowrap; position: sticky; top: 0; z-index: 2; text-align: left; font-size: 11px; color: #444; }
+thead th.col-num { width: 30px; text-align: center; color: #aaa; }
+thead th.col-del { width: 30px; }
+tbody tr:hover { background: #f7fbff; }
+tbody tr.synced td { background: #f3fff6; }
+tbody tr.saving    { opacity: .5; pointer-events: none; }
+tbody td { border: 1px solid #e8ecf0; padding: 0; white-space: nowrap; }
+td.num-cell { text-align: center; color: #bbb; padding: 4px; font-size: 11px; background: #fafbfc; }
+td input { width: 100%; border: none; outline: none; padding: 5px 7px; font-size: 12px; background: transparent; font-family: inherit; min-width: 72px; }
+td input:focus { background: #eaf7ff; }
+td.right input { text-align: right; }
+.del-btn { background: none; border: none; cursor: pointer; color: #ccc; font-size: 15px; padding: 2px 7px; line-height: 1; display: block; width: 100%; }
+.del-btn:hover { color: #e33; }
+tfoot td { background: #f0f4f8; border: 1px solid #dde1e7; padding: 5px 8px; font-weight: 700; font-size: 12px; color: #333; }
+.empty-msg td { text-align: center; padding: 32px; color: #aaa; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<div id="screenInstall" class="screen">
+    <h2>🗂 Медиаборды — установка</h2>
+    <p>Регистрируем вкладку «Медиаборды» в карточке сделки...</p>
+    <div id="installMsg">⏳ Подождите...</div>
+</div>
+
+<div id="screenNoDeal" class="screen">
+    <h3>⚠️ Приложение открыто вне карточки сделки</h3>
+    <p>Установка прошла успешно.<br>
+    Откройте любую сделку в CRM и перейдите на вкладку <strong>«Медиаборды»</strong>.</p>
+</div>
+
+<div id="screenApp" class="screen">
+    <div id="toolbar">
+        <button class="btn btn-add"  id="btnAdd"  disabled>+ Добавить позицию</button>
+        <button class="btn btn-save" id="btnSave" disabled>💾 Сохранить</button>
+        <span id="status"></span>
+        <span id="initMsg">Инициализация...</span>
+    </div>
+    <div id="gridWrap">
+        <table>
+            <thead>
+                <tr>
+                    <th class="col-num">№</th>
+                    <th>Город</th><th>Медиаборд / Адрес</th><th>Формат</th>
+                    <th>Дата начала</th><th>Дата конца</th><th>Дней</th>
+                    <th>Кол-во щитов</th><th>Показов/день</th><th>Показов итого</th>
+                    <th>Прайс с НДС</th><th>Прайс/день</th><th>Категория</th>
+                    <th>Скидка %</th><th>Со скидкой</th><th>Итого с НДС</th>
+                    <th class="col-del"></th>
+                </tr>
+            </thead>
+            <tbody id="tbody">
+                <tr class="empty-msg"><td colspan="17">Загрузка...</td></tr>
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td colspan="9" style="text-align:right">Итого:</td>
+                    <td id="tShows">—</td><td id="tPrice">—</td>
+                    <td></td><td></td><td></td>
+                    <td id="tDisc">—</td><td id="tTotal">—</td><td></td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+</div>
+
+<script>
+const COLS = [
+    { key: 'city',       type: 'text',   right: false, xml: 'CITY'        },
+    { key: 'mediaboard', type: 'text',   right: false, xml: 'MEDIABOARD'  },
+    { key: 'format',     type: 'text',   right: false, xml: 'FORMAT'      },
+    { key: 'dateFrom',   type: 'date',   right: false, xml: 'DATE_FROM'   },
+    { key: 'dateTo',     type: 'date',   right: false, xml: 'DATE_TO'     },
+    { key: 'days',       type: 'number', right: true,  xml: 'DAYS'        },
+    { key: 'qty',        type: 'number', right: true,  xml: 'QTY'         },
+    { key: 'showsDay',   type: 'number', right: true,  xml: 'SHOWS_DAY'   },
+    { key: 'showsTotal', type: 'number', right: true,  xml: 'SHOWS_TOTAL' },
+    { key: 'priceList',  type: 'number', right: true,  xml: 'PRICE_LIST'  },
+    { key: 'priceDay',   type: 'number', right: true,  xml: 'PRICE_DAY'   },
+    { key: 'tier',       type: 'text',   right: false, xml: 'TIER'        },
+    { key: 'discount',   type: 'number', right: true,  xml: 'DISCOUNT'    },
+    { key: 'priceDisc',  type: 'number', right: true,  xml: 'PRICE_DISC'  },
+    { key: 'total',      type: 'number', right: true,  xml: 'TOTAL'       },
+];
+let DEAL_ID=null, ET_ID=null, UF_PRE=null, rows=[], saving=false;
+const $=id=>document.getElementById(id);
+function show(id){document.querySelectorAll('.screen').forEach(el=>el.classList.remove('active'));$(id).classList.add('active');}
+function setStatus(t){$('status').textContent=t;}
+function setInitMsg(t){$('initMsg').textContent=t;}
+function uid(){return '_'+Math.random().toString(36).slice(2,9);}
+function fmt(v){const n=parseFloat(v);return isNaN(n)?'—':n.toLocaleString('ru-RU');}
+function uf(col){return UF_PRE+col.xml;}
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');}
+function b24call(method,params){return new Promise((res,rej)=>{BX24.callMethod(method,params,r=>{if(r.error())rej(r.error());else res(r.data());});});}
+
+function doInstall(){
+    show('screenInstall');
+    const handler=window.location.origin+window.location.pathname;
+    BX24.callMethod('placement.bind',{PLACEMENT:'CRM_DEAL_DETAIL_TAB',HANDLER:handler,LANG_ALL:{ru:{TITLE:'Медиаборды',DESCRIPTION:'Позиции медиабордов по сделке'},en:{TITLE:'Mediaboards',DESCRIPTION:''}}},function(r){
+        const msg=$('installMsg');
+        if(r.error()){const d=r.error().ex?.error_description||'';if(/exist|already|дубл/i.test(d)){msg.textContent='✅ Вкладка уже зарегистрирована — всё готово!';}else{msg.textContent='⚠️ Ошибка: '+d;}}
+        else{msg.textContent='✅ Готово! Откройте любую сделку — там появится вкладка «Медиаборды».';}
+        BX24.installFinish();
+    });
+}
+
+async function ensureSpa(){
+    const cacheKey='mb_etid_'+(BX24.getDomain?BX24.getDomain():'x');
+    const cached=localStorage.getItem(cacheKey);
+    if(cached){ET_ID=parseInt(cached);UF_PRE='UF_CRM_'+ET_ID+'_';return;}
+    setInitMsg('Настройка смарт-процесса...');
+    const typesData=await b24call('crm.type.list',{});
+    const typesList=typesData.types||[];
+    let found=typesList.find(t=>t.title==='Позиции медиабордов');
+    if(!found){const created=await b24call('crm.type.add',{fields:{title:'Позиции медиабордов',isUseInUserfieldEnabled:'Y',relations:{parent:[{entityTypeId:2}]}}});ET_ID=parseInt(created.type?.entityTypeId??created.entityTypeId);}
+    else{ET_ID=parseInt(found.entityTypeId);}
+    UF_PRE='UF_CRM_'+ET_ID+'_';
+    const entityId='CRM_'+ET_ID;
+    setInitMsg('Создание полей...');
+    const ufList=await b24call('crm.userfield.list',{filter:{ENTITY_ID:entityId}});
+    const existXml=new Set(ufList.map(f=>f.XML_ID));
+    const defs=[{xml:'CITY',label:'Город',type:'string'},{xml:'MEDIABOARD',label:'Медиаборд',type:'string'},{xml:'FORMAT',label:'Формат',type:'string'},{xml:'DATE_FROM',label:'Дата начала',type:'date'},{xml:'DATE_TO',label:'Дата конца',type:'date'},{xml:'DAYS',label:'Кол-во дней',type:'integer'},{xml:'QTY',label:'Кол-во щитов',type:'integer'},{xml:'SHOWS_DAY',label:'Показов в день',type:'integer'},{xml:'SHOWS_TOTAL',label:'Показов итого',type:'integer'},{xml:'PRICE_LIST',label:'Прайс с НДС',type:'double'},{xml:'PRICE_DAY',label:'Прайс в день',type:'double'},{xml:'TIER',label:'Категория',type:'string'},{xml:'DISCOUNT',label:'Скидка %',type:'double'},{xml:'PRICE_DISC',label:'Со скидкой',type:'double'},{xml:'TOTAL',label:'Итого с НДС',type:'double'}];
+    for(const fd of defs){if(existXml.has(fd.xml))continue;try{await b24call('crm.userfield.add',{fields:{ENTITY_ID:entityId,FIELD_NAME:fd.xml.substring(0,20),USER_TYPE_ID:fd.type,XML_ID:fd.xml,EDIT_FORM_LABEL:{ru:fd.label,en:fd.label},LIST_COLUMN_LABEL:{ru:fd.label,en:fd.label}}});}catch(e){}}
+    localStorage.setItem(cacheKey,ET_ID);setInitMsg('');
+}
+
+async function loadRows(){
+    show('screenApp');
+    try{
+        await ensureSpa();setInitMsg('Загрузка строк...');
+        const res=await b24call('crm.item.list',{entityTypeId:ET_ID,filter:{parentId2:DEAL_ID},select:['id','title',...COLS.map(c=>uf(c))]});
+        rows=(res.items||[]).map(item=>{const data={};COLS.forEach(c=>{data[c.key]=item[uf(c)]??'';});return{lid:uid(),spaId:item.id,data};});
+        renderAll();setInitMsg('');
+        if(!rows.length)setStatus('Таблица пуста — нажмите «+ Добавить позицию»');
+        $('btnAdd').disabled=false;$('btnSave').disabled=false;
+    }catch(e){const msg=e?.ex?.error_description||JSON.stringify(e);setInitMsg('');setStatus('Ошибка: '+msg);$('tbody').innerHTML=`<tr class="empty-msg"><td colspan="17" style="color:#e33">Ошибка: ${msg}</td></tr>`;}
+}
+
+function renderAll(){const tbody=$('tbody');tbody.innerHTML='';if(!rows.length){tbody.innerHTML='<tr class="empty-msg"><td colspan="17">Нет позиций. Нажмите «+ Добавить позицию»</td></tr>';}else{rows.forEach((row,i)=>tbody.appendChild(buildTr(row,i)));}recalc();}
+
+function buildTr(row,idx){
+    const tr=document.createElement('tr');tr.dataset.lid=row.lid;if(row.spaId)tr.classList.add('synced');
+    const cells=COLS.map(c=>{const v=esc(row.data[c.key]??'');const t=c.type==='date'?'date':'text';return`<td class="${c.right?'right':''}"><input type="${t}" value="${v}" data-k="${c.key}"></td>`;}).join('');
+    tr.innerHTML=`<td class="num-cell">${idx+1}</td>${cells}<td><button class="del-btn">✕</button></td>`;
+    tr.querySelectorAll('input').forEach(inp=>{inp.addEventListener('input',()=>{row.data[inp.dataset.k]=inp.value;if(row.spaId)tr.classList.remove('synced');recalc();});});
+    tr.querySelector('.del-btn').addEventListener('click',()=>delRow(row,tr));return tr;
+}
+
+function recalc(){const s=k=>rows.reduce((a,r)=>a+(parseFloat(r.data[k])||0),0);$('tShows').textContent=fmt(s('showsTotal'));$('tPrice').textContent=fmt(s('priceList'));$('tDisc').textContent=fmt(s('priceDisc'));$('tTotal').textContent=fmt(s('total'));}
+
+function addRow(){const row={lid:uid(),spaId:null,data:Object.fromEntries(COLS.map(c=>[c.key,'']))};rows.push(row);const tbody=$('tbody');if(tbody.querySelector('.empty-msg'))tbody.innerHTML='';const tr=buildTr(row,rows.length-1);tbody.appendChild(tr);tr.scrollIntoView({behavior:'smooth',block:'nearest'});tr.querySelector('input')?.focus();setStatus('');recalc();}
+
+async function delRow(row,tr){if(!confirm('Удалить эту позицию?'))return;rows=rows.filter(r=>r.lid!==row.lid);tr.remove();if(!rows.length)renderAll();$('tbody').querySelectorAll('td.num-cell').forEach((td,i)=>{td.textContent=i+1;});recalc();if(row.spaId){try{await b24call('crm.item.delete',{entityTypeId:ET_ID,id:row.spaId});}catch(e){setStatus('Ошибка удаления: '+(e?.ex?.error_description||e));}}}
+
+async function saveAll(){if(saving)return;saving=true;$('btnSave').disabled=true;setStatus('Сохранение...');let ok=0,fail=0;
+    for(const row of rows){const tr=document.querySelector(`tr[data-lid="${row.lid}"]`);if(tr)tr.classList.add('saving');
+        const fields={title:row.data.mediaboard||row.data.city||('Позиция '+(rows.indexOf(row)+1)),parentId2:parseInt(DEAL_ID)};
+        COLS.forEach(c=>{const v=row.data[c.key];if(v!==''&&v!=null)fields[uf(c)]=v;});
+        try{if(row.spaId){await b24call('crm.item.update',{entityTypeId:ET_ID,id:row.spaId,fields});}else{const res=await b24call('crm.item.add',{entityTypeId:ET_ID,fields});row.spaId=res.item?.id;}
+        if(tr){tr.classList.remove('saving');tr.classList.add('synced');}ok++;}
+        catch(e){if(tr)tr.classList.remove('saving');console.error(e);fail++;}}
+    saving=false;$('btnSave').disabled=false;setStatus(fail?`Сохранено: ${ok}, ошибок: ${fail}`:`✅ Сохранено ${ok} позиций`);}
+
+BX24.init(function(){
+    if(BX24.isInstall()){doInstall();return;}
+    BX24.placement.info(function(info){
+        const rawId=info?.options?.ID??info?.options?.id??null;
+        DEAL_ID=rawId?parseInt(rawId):null;
+        if(!DEAL_ID){show('screenNoDeal');return;}
+        loadRows();
+    });
+});
+$('btnAdd').addEventListener('click',addRow);
+$('btnSave').addEventListener('click',saveAll);
+</script>
+</body>
+</html>
